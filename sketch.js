@@ -22,7 +22,6 @@ let iconNaGraphics, iconClGraphics;
 
 function preload() {
   // Tải font Arial.ttf, đảm bảo file Arial.ttf nằm trong cùng thư mục với sketch.js
-  // Nếu font này không hỗ trợ tốt các ký tự Unicode hoặc bạn cần hiệu ứng 3D mượt, có thể thay đổi font.
   myFont = loadFont('Arial.ttf');
 }
 
@@ -63,10 +62,10 @@ function draw() {
   // Áp dụng scale cho toàn cảnh 3D
   scale(zoomFactor);
   
-  // Nếu tự động xoay bật, cập nhật góc xoay dựa trên frameCount
+  // Nếu autoRotate bật, tiến hành xoay dựa trên giá trị hiện tại, thêm vào một ít mỗi frame
   if (autoRotate) {
-    rotationX = frameCount * 0.01;
-    rotationY = frameCount * 0.01;
+    rotationX += 0.01;
+    rotationY += 0.01;
   }
   
   // Áp dụng xoay cho cảnh 3D
@@ -134,7 +133,6 @@ function draw() {
   iconNaGraphics.ambientLight(60);
   iconNaGraphics.directionalLight(255, 255, 255, 0, -1, -1);
   iconNaGraphics.fill(0, 153, 255);
-  // Vẽ sphere với kích thước phù hợp cho icon
   iconNaGraphics.sphere(radiusNa);
   iconNaGraphics.pop();
   
@@ -164,12 +162,13 @@ function draw() {
   // Vẽ legend cho ion Na+
   let entry1Y = 5; // vị trí bắt đầu của dòng legend Na+
   image(iconNaGraphics, 0, entry1Y, iconSize, iconSize);
-  // Vẽ nhãn Na+ canh trái, đặt ở giữa theo chiều dọc của icon
+  // Canh giữa icon Na+ và nhãn Na+, nhãn được canh trái, đặt ở giữa theo chiều dọc của icon
   text("Na+", iconSize + 5, entry1Y + iconSize / 2);
   
   // Vẽ legend cho ion Cl-
   let entry2Y = entry1Y + iconSize - 10; // khoảng cách giữa các dòng legend
   image(iconClGraphics, 0, entry2Y, iconSize, iconSize);
+  // Canh giữa icon Cl- và nhãn Cl-
   text("Cl-", iconSize + 5, entry2Y + iconSize / 2);
   pop();
 }
