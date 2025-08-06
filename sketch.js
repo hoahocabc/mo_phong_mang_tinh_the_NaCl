@@ -16,11 +16,13 @@ let radiusCl = radiusNa * (181 / 102);
 
 let myFont;
 
+// Kích thước của offscreen graphics cho icon legend
+let iconSize = 50;
+let iconNaGraphics, iconClGraphics;
+
 function preload() {
-  // Nếu dạng "⁺" và "⁻" không hiển thị đúng,
-  // bạn có thể thử sử dụng một font hỗ trợ Unicode tốt hơn, ví dụ "Arial Unicode MS" hoặc "Noto Sans".
-  // Đảm bảo file font tương ứng có trong thư mục.
-  // Ví dụ: myFont = loadFont('ArialUnicodeMS.ttf');
+  // Tải font Arial.ttf, đảm bảo file Arial.ttf nằm trong cùng thư mục với sketch.js
+  // Nếu font này không hỗ trợ tốt các ký tự Unicode hoặc bạn cần hiệu ứng 3D mượt, có thể thay đổi font.
   myFont = loadFont('Arial.ttf');
 }
 
@@ -39,45 +41,55 @@ function setup() {
   autoRotateButton = createButton("Bật/Tắt xoay");
   autoRotateButton.position(10, 40);
   autoRotateButton.mousePressed(toggleAutoRotate);
+  
+  // Tạo offscreen graphics cho icon legend với chế độ WEBGL (để giữ hiệu ứng 3D)
+  iconNaGraphics = createGraphics(iconSize, iconSize, WEBGL);
+  iconNaGraphics.noStroke();
+  iconNaGraphics.textFont(myFont);
+  
+  iconClGraphics = createGraphics(iconSize, iconSize, WEBGL);
+  iconClGraphics.noStroke();
+  iconClGraphics.textFont(myFont);
 }
 
 function draw() {
-  // Nền màn hình là màu đen đậm
+  // Vẽ nền màu đen cho canvas chính
   background(0);
   
-  // Thiết lập ánh sáng để tạo hiệu ứng 3D rõ ràng
+  // Thiết lập ánh sáng cho cảnh 3D
   ambientLight(60);
   directionalLight(255, 255, 255, 0, -1, -1);
   
-  // Áp dụng hệ số thu/phóng
+  // Áp dụng scale cho toàn cảnh 3D
   scale(zoomFactor);
   
-  // Xoay tự động nếu đã bật, nếu không dùng giá trị xoay được cập nhật bởi chuột
+  // Nếu tự động xoay bật, cập nhật góc xoay dựa trên frameCount
   if (autoRotate) {
     rotationX = frameCount * 0.01;
     rotationY = frameCount * 0.01;
   }
+  
+  // Áp dụng xoay cho cảnh 3D
   rotateX(rotationX);
   rotateY(rotationY);
   
-  // Vẽ các ion trong lưới 3D, sử dụng 3 vòng lặp cho x, y, z
+  // Vẽ các ion theo lưới 3D với 3 vòng lặp
   for (let ix = 0; ix < numIons; ix++) {
     for (let iy = 0; iy < numIons; iy++) {
       for (let iz = 0; iz < numIons; iz++) {
         let offset = ((numIons - 1) * spacing) / 2;
-        // Tọa độ căn giữa
         let posX = ix * spacing - offset;
         let posY = iy * spacing - offset;
         let posZ = iz * spacing - offset;
         
         push();
         translate(posX, posY, posZ);
-        // Xen kẽ màu: Nếu tổng chỉ số chẵn -> Na+ (màu xanh), nếu lẻ -> Cl- (màu vàng)
+        // Xen kẽ màu: nếu tổng chỉ số chẵn thì vẽ Na+ (màu xanh), nếu lẻ thì vẽ Cl- (màu vàng)
         if ((ix + iy + iz) % 2 === 0) {
-          fill(0, 153, 255);   // Na+ màu xanh (giống như trong mạng tinh thể)
+          fill(0, 153, 255);
           sphere(radiusNa);
         } else {
-          fill(255, 204, 0);   // Cl- màu vàng
+          fill(255, 204, 0);
           sphere(radiusCl);
         }
         pop();
@@ -85,28 +97,26 @@ function draw() {
     }
   }
   
-  // Vẽ liên kết giữa các ion liền kề nếu đã bật
+  // Vẽ các liên kết giữa các ion liền kề nếu cờ drawBonds được bật
   if (drawBonds) {
     stroke(255, 150);
     strokeWeight(2);
-    
     for (let ix = 0; ix < numIons; ix++) {
       for (let iy = 0; iy < numIons; iy++) {
         for (let iz = 0; iz < numIons; iz++) {
           let offset = ((numIons - 1) * spacing) / 2;
           let pos = createVector(ix * spacing - offset, iy * spacing - offset, iz * spacing - offset);
-          
-          // Liên kết với hàng xóm ở +x
+          // Liên kết theo trục X
           if (ix < numIons - 1) {
             let neighborX = createVector((ix + 1) * spacing - offset, iy * spacing - offset, iz * spacing - offset);
             line(pos.x, pos.y, pos.z, neighborX.x, neighborX.y, neighborX.z);
           }
-          // Liên kết với hàng xóm ở +y
+          // Liên kết theo trục Y
           if (iy < numIons - 1) {
             let neighborY = createVector(ix * spacing - offset, (iy + 1) * spacing - offset, iz * spacing - offset);
             line(pos.x, pos.y, pos.z, neighborY.x, neighborY.y, neighborY.z);
           }
-          // Liên kết với hàng xóm ở +z
+          // Liên kết theo trục Z
           if (iz < numIons - 1) {
             let neighborZ = createVector(ix * spacing - offset, iy * spacing - offset, (iz + 1) * spacing - offset);
             line(pos.x, pos.y, pos.z, neighborZ.x, neighborZ.y, neighborZ.z);
@@ -117,59 +127,62 @@ function draw() {
     noStroke();
   }
   
-  // Vẽ chú thích cho ion Na+ và Cl- bên cạnh trái canvas và nằm dưới nút "Bật/Tắt xoay"
-  push();
-  // Reset hệ tọa độ để vẽ giao diện 2D trên canvas
-  resetMatrix();
-  // Chuyển từ hệ tọa độ của canvas WEBGL (trung tâm) về góc trái trên.
-  translate(-width/2 + 10, -height/2 + 70);
-  textSize(16);
-  textAlign(LEFT, TOP);
+  // Cập nhật offscreen graphics cho icon Na+ với hiệu ứng 3D
+  iconNaGraphics.push();
+  iconNaGraphics.clear();
+  iconNaGraphics.resetMatrix();
+  iconNaGraphics.ambientLight(60);
+  iconNaGraphics.directionalLight(255, 255, 255, 0, -1, -1);
+  iconNaGraphics.fill(0, 153, 255);
+  // Vẽ sphere với kích thước phù hợp cho icon
+  iconNaGraphics.sphere(radiusNa);
+  iconNaGraphics.pop();
   
-  // Vẽ tiêu đề chú thích
+  // Cập nhật offscreen graphics cho icon Cl- với hiệu ứng 3D
+  iconClGraphics.push();
+  iconClGraphics.clear();
+  iconClGraphics.resetMatrix();
+  iconClGraphics.ambientLight(60);
+  iconClGraphics.directionalLight(255, 255, 255, 0, -1, -1);
+  iconClGraphics.fill(255, 204, 0);
+  iconClGraphics.sphere(radiusCl);
+  iconClGraphics.pop();
+  
+  // Vẽ phần legend (chú thích) dưới dạng giao diện 2D không bị ảnh hưởng bởi các phép biến đổi 3D
+  push();
+  resetMatrix();
+  // Dịch hệ tọa độ về góc trên bên trái với đệm cố định
+  translate(-width / 2 + 10, -height / 2 + 80);
+  textSize(16);
+  // Đặt canh trái và canh giữa (trục dọc) cho chữ
+  textAlign(LEFT, CENTER);
   fill(255);
+  
+  // Vẽ tiêu đề "Chú thích:" canh trái
   text("Chú thích:", 0, 0);
   
-  // Chú thích cho Na+
-  push();
-  translate(10, 30); // cách tiêu đề 30px
-  push();
-  translate(10, 10);
-  fill(0, 153, 255);
-  // Giảm kích thước icon Na+ bằng cách giảm tỉ lệ nhân (sử dụng 1.0)
-  sphere(radiusNa * 1.0);
-  pop();
-  fill(255);
-  // Nếu Unicode hiển thị thành ô vuông, hãy thử font hỗ trợ Unicode, hoặc thay thế bằng chuỗi "+", ví dụ: "Na+"
-  text("Na+", 40, 3);
-  pop();
+  // Vẽ legend cho ion Na+
+  let entry1Y = 5; // vị trí bắt đầu của dòng legend Na+
+  image(iconNaGraphics, 0, entry1Y, iconSize, iconSize);
+  // Vẽ nhãn Na+ canh trái, đặt ở giữa theo chiều dọc của icon
+  text("Na+", iconSize + 5, entry1Y + iconSize / 2);
   
-  // Chú thích cho Cl-
-  push();
-  translate(10, 70); // cách Na+ thêm khoảng 40px
-  push();
-  translate(10, 10);
-  fill(255, 204, 0);
-  sphere(radiusCl * 1.0);
-  pop();
-  fill(255);
-  // Nếu Unicode hiển thị sai, hãy thử hiển thị "Cl-" thay vì "Cl⁻"
-  text("Cl-", 40, 3);
-  pop();
+  // Vẽ legend cho ion Cl-
+  let entry2Y = entry1Y + iconSize - 10; // khoảng cách giữa các dòng legend
+  image(iconClGraphics, 0, entry2Y, iconSize, iconSize);
+  text("Cl-", iconSize + 5, entry2Y + iconSize / 2);
   pop();
 }
 
-// Hàm bật/tắt liên kết giữa các nguyên tử
 function toggleBonds() {
   drawBonds = !drawBonds;
 }
 
-// Hàm bật/tắt xoay tự động
 function toggleAutoRotate() {
   autoRotate = !autoRotate;
 }
 
-// Cho phép xoay khi bấm giữ chuột trái (chỉ khi autoRotate tắt)
+// Cho phép xoay cảnh 3D khi kéo chuột (chỉ khi autoRotate tắt)
 function mouseDragged() {
   if (mouseButton === LEFT && !autoRotate) {
     let dx = mouseX - pmouseX;
@@ -179,7 +192,7 @@ function mouseDragged() {
   }
 }
 
-// Lăn chuột để thu/phóng
+// Điều chỉnh zoom bằng con lăn chuột
 function mouseWheel(event) {
   zoomFactor *= 1 - event.delta * 0.001;
   zoomFactor = constrain(zoomFactor, 0.2, 5);
