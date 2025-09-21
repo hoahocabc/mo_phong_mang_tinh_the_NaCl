@@ -1,8 +1,6 @@
-// sketch.js - Đảm bảo kéo chuột luôn xoay cùng hướng di chuyển chuột
-// - rotateY trước rồi rotateX
-// - tính camera world bằng rotateVectorByYX (Y then X)
-// - mouseDragged cập nhật rotationY += dx*sens, rotationX += dy*sens
-// - giữ giới hạn/smoothing cho auto-rotate để tránh hỗn loạn
+// sketch.js - Tối ưu để chạy mượt hơn trên smartphone
+// Sửa lỗi: tránh gọi sphereDetail khi hàm không tồn tại (ReferenceError)
+// Sửa cảnh báo p5.js về tên reserved function "mag" (đổi tên biến thành distMag)
 
 let spacing = 60;
 let numIons = 4;
@@ -39,15 +37,27 @@ let radiusCl = radiusNa * (181 / 102);
 let myFont = null;
 let fontLoaded = false;
 let ions = [];
+let bonds = []; // precomputed bonds (pairs of positions) to avoid heavy per-frame work
 
 let BUTTON_W = 130;
 const BUTTON_H = 34;
 const BUTTON_SPACING = 10;
 
+// Performance tuning
+const IS_MOBILE = (typeof navigator !== 'undefined') && /Mobi|Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent);
+let SPHERE_DETAIL = IS_MOBILE ? 6 : 12; // lower polygon count on mobile
+let LABEL_GFX_SIZE = IS_MOBILE ? { w: 160, h: 80 } : { w: 256, h: 128 };
+let LABEL_PLANE_SIZE = IS_MOBILE ? 20 : 28;
+let TARGET_FPS = IS_MOBILE ? 40 : 60;
+let PIXEL_DENSITY_TARGET = IS_MOBILE ? 1 : Math.min(2, (window.devicePixelRatio || 1));
+
 function setup() {
+  pixelDensity(PIXEL_DENSITY_TARGET);
   canvas = createCanvas(windowWidth, windowHeight, WEBGL);
   noStroke();
   canvas.style('display', 'block');
+
+  frameRate(TARGET_FPS);
 
   // Try to load a custom font asynchronously (safe). No console.log on success.
   let fontPath = 'https://assets.editor.p5js.org/6809a48b6c699fd6d22a7d6d/3a9355cc-1dcb-44ce-8034-4e68ba3b8af2.ttf?v=1758200715842';
@@ -116,13 +126,29 @@ function setup() {
   footerDiv.style('font-size', '13px');
   footerDiv.style('font-weight', '600');
 
+  // Do NOT call sphereDetail here unguarded - some p5 environments may not expose it as a global yet.
+  // We'll set sphereDetail each frame (guarded) in draw().
+
   initIons();
   updateUIText();
+
+  // Enable depth test once (avoid per-frame cost)
+  let gl = (this && this._renderer && this._renderer.drawingContext) ? this._renderer.drawingContext : drawingContext;
+  if (gl && gl.enable) {
+    try { gl.enable(gl.DEPTH_TEST); } catch (e) {}
+  }
 }
 
 function initIons() {
   ions = [];
+  bonds = [];
   let offset = ((numIons - 1) * spacing) / 2;
+
+  // Use smaller label gfx on mobile to save memory
+  let gfxW = LABEL_GFX_SIZE.w;
+  let gfxH = LABEL_GFX_SIZE.h;
+
+  // First build ions and label textures
   for (let ix = 0; ix < numIons; ix++) {
     for (let iy = 0; iy < numIons; iy++) {
       for (let iz = 0; iz < numIons; iz++) {
@@ -131,7 +157,8 @@ function initIons() {
         let pz = iz * spacing - offset;
         let type = ((ix + iy + iz) % 2 === 0) ? "Na" : "Cl";
 
-        let w = 256, h = 128;
+        // Create a small graphics for labels (reduced on mobile)
+        let w = gfxW, h = gfxH;
         let g = createGraphics(w, h);
         g.pixelDensity(1);
         g.clear();
@@ -144,7 +171,8 @@ function initIons() {
 
         if (type === "Cl") {
           let base = "Cl", sup = "⁻";
-          let baseSize = 64, supSize = 36;
+          let baseSize = Math.round(w * 0.25);
+          let supSize = Math.round(w * 0.14);
           g.textAlign(LEFT, CENTER);
           g.textSize(baseSize);
           let baseW = g.textWidth(base);
@@ -157,7 +185,8 @@ function initIons() {
           g.textSize(supSize); g.text(sup, startX + baseW, centerY - baseSize * 0.36);
         } else {
           let base = "Na", sup = "⁺";
-          let baseSize = 44, supSize = 26;
+          let baseSize = Math.round(w * 0.17);
+          let supSize = Math.round(w * 0.10);
           g.textAlign(LEFT, CENTER);
           g.textSize(baseSize);
           let baseW = g.textWidth(base);
@@ -178,8 +207,37 @@ function initIons() {
           w: w, h: h,
           radius: r,
           labelOffset: 4,
-          planeSize: 28
+          planeSize: LABEL_PLANE_SIZE
         });
+      }
+    }
+  }
+
+  // Precompute bonds (pairs of positions) once to avoid per-frame allocations
+  for (let ix = 0; ix < numIons; ix++) {
+    for (let iy = 0; iy < numIons; iy++) {
+      for (let iz = 0; iz < numIons; iz++) {
+        let x0 = ix * spacing - offset;
+        let y0 = iy * spacing - offset;
+        let z0 = iz * spacing - offset;
+        if (ix < numIons - 1) {
+          bonds.push({
+            ax: x0, ay: y0, az: z0,
+            bx: (ix + 1) * spacing - offset, by: y0, bz: z0
+          });
+        }
+        if (iy < numIons - 1) {
+          bonds.push({
+            ax: x0, ay: y0, az: z0,
+            bx: x0, by: (iy + 1) * spacing - offset, bz: z0
+          });
+        }
+        if (iz < numIons - 1) {
+          bonds.push({
+            ax: x0, ay: y0, az: z0,
+            bx: x0, by: y0, bz: (iz + 1) * spacing - offset
+          });
+        }
       }
     }
   }
@@ -267,11 +325,18 @@ function rotateVectorByYX(v, ay, ax) {
 }
 
 function draw() {
+  // Clear background
   background(0);
 
+  // Lights (we reduce directional intensity on mobile to save render cost)
   ambientLight(140);
-  directionalLight(255, 255, 255, -0.5, -1, -0.5);
+  if (IS_MOBILE) {
+    directionalLight(230, 230, 230, -0.5, -1, -0.5);
+  } else {
+    directionalLight(255, 255, 255, -0.5, -1, -0.5);
+  }
 
+  // scale (zoom)
   scale(zoomFactor);
 
   // apply auto-rotate speeds if enabled
@@ -291,8 +356,20 @@ function draw() {
   rotateY(rotationY);
   rotateX(rotationX);
 
-  // Draw spheres
-  for (let ion of ions) {
+  // Ensure sphereDetail is applied if available (guard to avoid ReferenceError)
+  // Some p5 environments may not expose sphereDetail as a global; guard before calling.
+  let sdFunc = (typeof sphereDetail === 'function') ? sphereDetail :
+               (typeof this !== 'undefined' && typeof this.sphereDetail === 'function') ? this.sphereDetail :
+               null;
+  if (sdFunc) {
+    try { sdFunc(SPHERE_DETAIL); } catch (e) { /* ignore if still not supported */ }
+  }
+
+  // draw spheres (cache length)
+  let n = ions.length;
+
+  for (let i = 0; i < n; i++) {
+    let ion = ions[i];
     push();
     translate(ion.center.x, ion.center.y, ion.center.z);
     if (ion.type === "Na") fill(0, 153, 255); else fill(255, 204, 0);
@@ -301,29 +378,13 @@ function draw() {
     pop();
   }
 
-  // Draw bonds if enabled
+  // Draw bonds if enabled - use precomputed bonds array
   if (drawBonds) {
     stroke(255, 150);
     strokeWeight(2);
-    let offset = ((numIons - 1) * spacing) / 2;
-    for (let ix = 0; ix < numIons; ix++) {
-      for (let iy = 0; iy < numIons; iy++) {
-        for (let iz = 0; iz < numIons; iz++) {
-          let pos = createVector(ix * spacing - offset, iy * spacing - offset, iz * spacing - offset);
-          if (ix < numIons - 1) {
-            let nx = createVector((ix + 1) * spacing - offset, iy * spacing - offset, iz * spacing - offset);
-            line(pos.x, pos.y, pos.z, nx.x, nx.y, nx.z);
-          }
-          if (iy < numIons - 1) {
-            let ny = createVector(ix * spacing - offset, (iy + 1) * spacing - offset, iz * spacing - offset);
-            line(pos.x, pos.y, pos.z, ny.x, ny.y, ny.z);
-          }
-          if (iz < numIons - 1) {
-            let nz = createVector(ix * spacing - offset, iy * spacing - offset, (iz + 1) * spacing - offset);
-            line(pos.x, pos.y, pos.z, nz.x, nz.y, nz.z);
-          }
-        }
-      }
+    for (let i = 0, m = bonds.length; i < m; i++) {
+      let b = bonds[i];
+      line(b.ax, b.ay, b.az, b.bx, b.by, b.bz);
     }
     noStroke();
   }
@@ -335,22 +396,28 @@ function draw() {
   // inverse transforms: rotate by -rotationY around Y then -rotationX around X
   let camWorld = rotateVectorByYX(camCamSpace, -rotationY, -rotationX);
 
-  // Enable depth test
-  let gl = (this && this._renderer && this._renderer.drawingContext) ? this._renderer.drawingContext : drawingContext;
-  if (gl && gl.enable) {
-    try { gl.enable(gl.DEPTH_TEST); } catch (e) {}
-  }
-
   // Draw labels (billboard): undo scene rotation in reverse order (X then Y)
   if (showLabels) {
-    for (let ion of ions) {
-      let dir = p5.Vector.sub(camWorld, ion.center);
-      if (dir.mag() === 0) dir = createVector(0, 0, 1);
-      dir.normalize();
-      let labelPos = p5.Vector.add(ion.center, p5.Vector.mult(dir, ion.radius + ion.labelOffset));
+    for (let i = 0; i < n; i++) {
+      let ion = ions[i];
+
+      // compute dir = camWorld - ion.center (use local names and avoid using reserved "mag")
+      let dirx = camWorld.x - ion.center.x;
+      let diry = camWorld.y - ion.center.y;
+      let dirz = camWorld.z - ion.center.z;
+      let distMag = Math.sqrt(dirx * dirx + diry * diry + dirz * dirz);
+      if (distMag === 0) {
+        dirx = 0; diry = 0; dirz = 1; distMag = 1;
+      }
+      // normalize
+      dirx /= distMag; diry /= distMag; dirz /= distMag;
+
+      let labelPosX = ion.center.x + dirx * (ion.radius + ion.labelOffset);
+      let labelPosY = ion.center.y + diry * (ion.radius + ion.labelOffset);
+      let labelPosZ = ion.center.z + dirz * (ion.radius + ion.labelOffset);
 
       push();
-      translate(labelPos.x, labelPos.y, labelPos.z);
+      translate(labelPosX, labelPosY, labelPosZ);
       // undo scene rotation: rotateX(-rotationX) then rotateY(-rotationY)
       rotateX(-rotationX);
       rotateY(-rotationY);
@@ -368,16 +435,26 @@ function draw() {
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
+  PIXEL_DENSITY_TARGET = IS_MOBILE ? 1 : Math.min(2, (window.devicePixelRatio || 1));
+  pixelDensity(PIXEL_DENSITY_TARGET);
 }
 
 // mouseDragged: always rotate in same direction as mouse movement (right -> rotate right, down -> rotate down)
 function mouseDragged() {
+  // ignore drags that originate from UI DOM elements (let DOM handle them)
+  if (mouseX < BUTTON_W + 20 && mouseY < windowHeight - 20) {
+    return;
+  }
+
   if (mouseButton === LEFT) {
     let dx = mouseX - pmouseX;
     let dy = mouseY - pmouseY;
 
-    let incY = dx * MANUAL_SENS; // yaw change; positive dx => positive yaw
-    let incX = dy * MANUAL_SENS; // pitch change; positive dy => positive pitch
+    // Slightly adjust manual sensitivity on mobile to be smoother
+    let sens = IS_MOBILE ? MANUAL_SENS * 0.9 : MANUAL_SENS;
+
+    let incY = dx * sens; // yaw change; positive dx => positive yaw
+    let incX = dy * sens; // pitch change; positive dy => positive pitch
     incY = constrain(incY, -MAX_MANUAL_INCREMENT, MAX_MANUAL_INCREMENT);
     incX = constrain(incX, -MAX_MANUAL_INCREMENT, MAX_MANUAL_INCREMENT);
 
